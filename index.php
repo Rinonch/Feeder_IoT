@@ -347,6 +347,8 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
       });
       document.getElementById("lastFeedInfo").innerText = "Terakhir memberi makan: " + formatted;
     }
+
+    document.getElementById("feedProgress").value = data.level_pakan;
   });
 
   client.on("close", () => {
