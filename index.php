@@ -181,6 +181,12 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
   <button id="btnReset">♻ Reset Jadwal</button>
 
   <div id="toast"></div>
+
+  <div style="margin:10px 0;">
+    <progress id="feedProgress" value="0" max="100" style="width:100%;height:20px;"></progress>
+  </div>
+
+  <div style="margin-top:15px;font-size:0.9em;color:#888;">Smart Feeder Ikan v1.0</div>
 </div>
 
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
@@ -196,6 +202,7 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
   const jadwalPagiElem = document.getElementById('jadwalPagi');
   const jadwalSoreElem = document.getElementById('jadwalSore');
   const toast = document.getElementById('toast');
+  const feedProgress = document.getElementById('feedProgress');
 
   function showToast(message) {
     toast.textContent = message;
@@ -215,12 +222,26 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
   btnFeed.onclick = async () => {
     btnFeed.disabled = true;
     btnFeed.textContent = '⏳ Memberi makan...';
+    feedProgress.value = 0;
+    feedProgress.style.display = 'block';
     try {
       const res = await fetch('feed.php');
       const data = await res.json();
       if (data.success) {
         lastFeedInfo.textContent = `Terakhir memberi makan: ${data.last_feed}`;
         showToast('Pakan diberikan!');
+        // Mulai progress dari 0 ke 100%
+        let progress = 0;
+        const interval = setInterval(() => {
+          progress += 2;
+          feedProgress.value = progress;
+          if (progress === 100) {
+            clearInterval(interval);
+            setTimeout(() => {
+              feedProgress.style.display = 'none';
+            }, 500);
+          }
+        }, 100);
       } else {
         showToast(data.message || 'Gagal memberi makan');
       }
@@ -262,9 +283,11 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
   };
 
   btnReset.onclick = () => {
-    inputPagi.value = '';
-    inputSore.value = '';
-    showToast('Input jadwal direset');
+    if (confirm('Yakin ingin mereset jadwal?')) {
+      inputPagi.value = '';
+      inputSore.value = '';
+      showToast('Input jadwal direset');
+    }
   };
 
   const options = {
@@ -296,9 +319,33 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
     levelElem.innerText = data.level_pakan + "%";
     levelElem.style.color = data.level_pakan < 30 ? "red" : "#00695c";
 
-    // Tambahkan baris berikut untuk update waktu terakhir memberi makan secara real-time
+    // Update status stok pakan
+    const stokElem = document.getElementById("stok");
+    if (data.level_pakan == 0) {
+      stokElem.innerText = "Habis";
+      stokElem.style.color = "red";
+      showToast("Stok pakan habis!");
+    } else if (data.level_pakan < 30) {
+      stokElem.innerText = "Hampir Habis";
+      stokElem.style.color = "red";
+      showToast("Stok pakan hampir habis!");
+    } else {
+      stokElem.innerText = "Tersedia";
+      stokElem.style.color = "#00695c";
+    }
+
+    // Update waktu terakhir memberi makan (real-time, WIB)
     if (data.last_feed) {
-      document.getElementById("lastFeedInfo").innerText = "Terakhir memberi makan: " + data.last_feed;
+      const [tgl, jam] = data.last_feed.split(' ');
+      const [day, month, year] = tgl.split('/');
+      const [hour, minute, second] = jam.split(':');
+      const dateObj = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+      dateObj.setUTCHours(dateObj.getUTCHours() + 7);
+      const formatted = dateObj.toLocaleString('id-ID', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+      document.getElementById("lastFeedInfo").innerText = "Terakhir memberi makan: " + formatted;
     }
   });
 
