@@ -1,14 +1,16 @@
 <?php
-// Koneksi ke database
-$conn = new mysqli("localhost", "tkbmyid_zaidan", "#Us3r_A1r_2025#", "tkbmyid_feeder");
-if ($conn->connect_error) die("Koneksi gagal: " . $conn->connect_error);
+include 'koneksi.php'; // pastikan file koneksi.php sudah benar
 
-// Ambil data feeder
-$result = $conn->query("SELECT * FROM feeder_status LIMIT 1");
-$data = $result->fetch_assoc();
-$pagi = substr($data['jadwal_pagi'], 0, 5); // Format HH:MM
-$sore = substr($data['jadwal_sore'], 0, 5);
-$lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'])) : "Belum pernah memberi makan";
+// Ambil data dari tabel feeder_status
+$q = $conn->query("SELECT * FROM feeder_status LIMIT 1");
+$data = $q->fetch_assoc();
+
+$status_feeder = $data['status_feeder'] ?? '-';
+$jadwal_pagi = $data['jadwal_pagi'] ?? '-';
+$jadwal_sore = $data['jadwal_sore'] ?? '-';
+$lastFeed = $data['last_feed'] ?? '-';
+$pagi = $data['jadwal_pagi'] ?? '';
+$sore = $data['jadwal_sore'] ?? '';
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -155,16 +157,48 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
   </div>
 
   <div class="status">
-    <strong>Status Feeder:</strong> <span id="status">-</span><br>
-    <strong>Level Pakan:</strong> <span id="level">-</span><br>
-    <strong>Waktu Sensor:</strong> <span id="waktu">-</span>
+    <strong>Status Feeder:</strong> <span id="status"><?= htmlspecialchars($status_feeder) ?></span>
   </div>
   <div class="status">
-    <strong>Jadwal Pagi:</strong> <span id="jadwalPagi"><?= htmlspecialchars($pagi) ?></span><br>
-    <strong>Jadwal Sore:</strong> <span id="jadwalSore"><?= $sore ?></span>
+    <strong>Jadwal Pagi:</strong> <span id="jadwalPagi"><?= htmlspecialchars($jadwal_pagi) ?></span><br>
+    <strong>Jadwal Sore:</strong> <span id="jadwalSore"><?= htmlspecialchars($jadwal_sore) ?></span>
   </div>
 
   <button id="btnFeed">🍽 Kasih Makan Sekarang</button>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="/public/autoFeed.js"></script>
+  <script>
+    function publishFeedCommand() {
+      const client = mqtt.connect('wss://a0217047345f4f5bb0814a9c88af029b.s1.eu.hivemq.cloud:8884/mqtt', {
+        username: 'feeder',
+        password: 'Feeder123',
+        protocolVersion: 4,
+        clean: true,
+        reconnectPeriod: 1000,
+      });
+
+      client.on('connect', function () {
+        console.log('Connected to HiveMQ WebSocket');
+        client.publish('feeder/command', 'feed', { qos: 0 }, function (err) {
+          if (err) {
+            console.error('Publish error:', err);
+          } else {
+            console.log('Feed command published');
+          }
+          client.end();
+        });
+      });
+
+      client.on('error', function (err) {
+        console.error('Connection error:', err);
+        client.end();
+      });
+    }
+
+    document.getElementById('btnFeed').addEventListener('click', function () {
+      publishFeedCommand();
+    });
+  </script>
 
   <div class="last-feed" id="lastFeedInfo">Terakhir memberi makan: <?= $lastFeed ?></div>
 
@@ -182,10 +216,6 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
 
   <div id="toast"></div>
 
-  <div style="margin:10px 0;">
-    <progress id="feedProgress" value="0" max="100" style="width:100%;height:20px;"></progress>
-  </div>
-
   <div style="margin-top:15px;font-size:0.9em;color:#888;">Smart Feeder Ikan v1.0</div>
 </div>
 
@@ -202,7 +232,6 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
   const jadwalPagiElem = document.getElementById('jadwalPagi');
   const jadwalSoreElem = document.getElementById('jadwalSore');
   const toast = document.getElementById('toast');
-  const feedProgress = document.getElementById('feedProgress');
 
   function showToast(message) {
     toast.textContent = message;
@@ -217,35 +246,50 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
     const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
     dateElem.textContent = days[now.getDay()] + ', ' + now.getDate() + '/' + (now.getMonth()+1) + '/' + now.getFullYear();
     timeElem.textContent = now.toLocaleTimeString();
+
+    // Update last feed time in real-time if available
+    const lastFeedElem = document.getElementById('lastFeedInfo');
+    if (lastFeedElem) {
+      const lastFeedText = lastFeedElem.textContent;
+      const match = lastFeedText.match(/(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2})/);
+      if (match) {
+        // Parse date string as UTC and convert to WIB (UTC+7)
+        const utcDateStr = match[1].replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1');
+        const lastFeedDateUTC = new Date(utcDateStr + 'T00:00:00Z');
+        if (!isNaN(lastFeedDateUTC)) {
+          // Add 7 hours for WIB timezone
+          lastFeedDateUTC.setHours(lastFeedDateUTC.getHours() + 7);
+          // Increment last feed time by 1 second
+          lastFeedDateUTC.setSeconds(lastFeedDateUTC.getSeconds() + 1);
+          const formatted = lastFeedDateUTC.toLocaleString('id-ID', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+          });
+          lastFeedElem.textContent = 'Terakhir memberi makan: ' + formatted;
+        }
+      }
+    }
   }
 
   btnFeed.onclick = async () => {
     btnFeed.disabled = true;
     btnFeed.textContent = '⏳ Memberi makan...';
-    feedProgress.value = 0;
-    feedProgress.style.display = 'block';
     try {
       const res = await fetch('feed.php');
+      if (!res.ok) throw new Error('Network response was not ok');
       const data = await res.json();
       if (data.success) {
-        lastFeedInfo.textContent = `Terakhir memberi makan: ${data.last_feed}`;
+        // Update last feed info if element exists
+        const lastFeedElem = document.getElementById('lastFeedInfo');
+        if (lastFeedElem && data.last_feed) {
+          lastFeedElem.textContent = `Terakhir memberi makan: ${data.last_feed}`;
+        }
         showToast('Pakan diberikan!');
-        // Mulai progress dari 0 ke 100%
-        let progress = 0;
-        const interval = setInterval(() => {
-          progress += 2;
-          feedProgress.value = progress;
-          if (progress === 100) {
-            clearInterval(interval);
-            setTimeout(() => {
-              feedProgress.style.display = 'none';
-            }, 500);
-          }
-        }, 100);
       } else {
         showToast(data.message || 'Gagal memberi makan');
       }
-    } catch {
+    } catch (error) {
+      console.error('Fetch error:', error);
       showToast('Gagal memberi makan');
     }
     btnFeed.textContent = '🍽 Kasih Makan Sekarang';
@@ -311,13 +355,7 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
 
   client.on("message", (topic, message) => {
     const data = JSON.parse(message.toString());
-    document.getElementById("status").innerText = data.status_feeder;
-    document.getElementById("level").innerText = data.level_pakan + "%";
-    document.getElementById("waktu").innerText = data.waktu;
-
-    const levelElem = document.getElementById("level");
-    levelElem.innerText = data.level_pakan + "%";
-    levelElem.style.color = data.level_pakan < 30 ? "red" : "#00695c";
+    document.getElementById("status").innerText = data.status_feeder === "ONLINE" ? "ONLINE" : "OFFLINE";
 
     // Update status stok pakan
     const stokElem = document.getElementById("stok");
@@ -336,19 +374,43 @@ $lastFeed = $data['last_feed'] ? date("d/m/Y H:i:s", strtotime($data['last_feed'
 
     // Update waktu terakhir memberi makan (real-time, WIB)
     if (data.last_feed) {
-      const [tgl, jam] = data.last_feed.split(' ');
-      const [day, month, year] = tgl.split('/');
-      const [hour, minute, second] = jam.split(':');
-      const dateObj = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
-      dateObj.setUTCHours(dateObj.getUTCHours() + 7);
-      const formatted = dateObj.toLocaleString('id-ID', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit', second: '2-digit'
-      });
-      document.getElementById("lastFeedInfo").innerText = "Terakhir memberi makan: " + formatted;
+      const lastFeedElem = document.getElementById("lastFeedInfo");
+      if (lastFeedElem) {
+        // Cek apakah format last_feed valid
+        if (data.last_feed.includes(' ')) {
+          const [tgl, jam] = data.last_feed.split(' ');
+          const [year, month, day] = tgl.includes('-') ? tgl.split('-') : tgl.split('/');
+          if (jam) {
+            const [hour, minute, second] = jam.split(':');
+            const dateObj = new Date(year, month - 1, day, hour, minute, second);
+            const formatted = dateObj.toLocaleString('id-ID', {
+              day: '2-digit', month: '2-digit', year: 'numeric',
+              hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+            lastFeedElem.innerText = "Terakhir memberi makan: " + formatted;
+          } else {
+            lastFeedElem.innerText = "Terakhir memberi makan: " + data.last_feed;
+          }
+        } else {
+          lastFeedElem.innerText = "Terakhir memberi makan: " + data.last_feed;
+        }
+      }
     }
 
-    document.getElementById("feedProgress").value = data.level_pakan;
+    // Removed feedProgress update to avoid error as element is not present
+    // document.getElementById("feedProgress").value = data.level_pakan;
+    fetch('update_status.php?status=ONLINE');
+  });
+
+  // Set status_feeder OFFLINE jika tidak ada pesan dalam 10 detik
+  let feederTimeout;
+  function setFeederOffline() {
+    document.getElementById("status").innerText = "OFFLINE";
+    fetch('update_status.php?status=OFFLINE');
+  }
+  client.on("message", () => {
+    clearTimeout(feederTimeout);
+    feederTimeout = setTimeout(setFeederOffline, 10000);
   });
 
   client.on("close", () => {

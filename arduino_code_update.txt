@@ -1,0 +1,232 @@
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+#include <ESP32Servo.h>
+#include <RTClib.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+const char* ssid = "Zaidan_23";
+const char* password = "22222222";
+
+const char* mqtt_server = "a0217047345f4f5bb0814a9c88af029b.s1.eu.hivemq.cloud";
+const int mqtt_port = 8883;
+const char* mqtt_user = "feeder";
+const char* mqtt_pass = "Feeder123";
+const char* mqtt_topic = "feeder/status";
+const char* mqtt_command_topic = "feeder/command";
+
+WiFiClientSecure espClient;
+PubSubClient client(espClient);
+
+RTC_DS1307 rtc;
+#include <Wire.h>
+
+// Correct I2C address for your LCD and RTC might differ; verify with I2C scanner
+#define LCD_ADDRESS 0x27
+#define RTC_ADDRESS 0x68
+
+LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2);
+char daysOfTheWeek[7][12] = {"Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jum'at", "Sabtu"};
+
+Servo servo1;
+const int servoPin = 13;
+const int btnPin = 4;
+int btnStatus = 0;
+int lastBtnStatus = LOW; // For button state change detection
+unsigned long lastDebounceTime = 0;
+unsigned long debounceDelay = 50; // 50 ms debounce
+
+unsigned long previousMillis = 0;
+const long disp_interval = 1000; // refresh LCD tiap 1 detik
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message;
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("]: ");
+  Serial.println(message);
+
+  if (String(topic) == mqtt_command_topic) {
+    if (message == "feed") {
+      Serial.println("Activating servo due to feed command");
+      kontrol_katup(1, 300, 45);
+      Serial.println("Servo activation complete");
+    }
+  }
+}
+
+void setup_wifi() {
+  Serial.println("Menghubungkan ke WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi terhubung, IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Menghubungkan ke MQTT...");
+    String clientId = "esp32-client-" + String(random(0xffff), HEX);
+    if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
+      Serial.println("Terhubung ke MQTT");
+      if (client.subscribe(mqtt_command_topic)) {
+        Serial.println("Subscribed to topic");
+      } else {
+        Serial.println("Failed to subscribe to topic");
+      }
+    } else {
+      Serial.print("Gagal, rc=");
+      Serial.print(client.state());
+      delay(5000);
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Fish Feeder");
+
+  servo1.attach(servoPin);
+  servo1.write(0);
+
+  pinMode(btnPin, INPUT);
+
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(2, 0);
+  lcd.print("Fish Feeder");
+  delay(1000);
+  lcd.clear();
+
+  if (!rtc.begin()) {
+    Serial.println("RTC tidak ditemukan!");
+    while (1) delay(10);
+  }
+
+  // Synchronize RTC time with NTP server on startup
+  configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov"); // UTC+7 timezone
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Gagal mendapatkan waktu dari NTP");
+  } else {
+    rtc.adjust(DateTime(
+      timeinfo.tm_year + 1900,
+      timeinfo.tm_mon + 1,
+      timeinfo.tm_mday,
+      timeinfo.tm_hour,
+      timeinfo.tm_min,
+      timeinfo.tm_sec
+    ));
+    Serial.println("RTC disinkronisasi dengan NTP");
+  }
+
+  setup_wifi();
+  espClient.setInsecure(); // trust semua sertifikat (dev only)
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+}
+
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  Time_display(); // Tampilkan jam dan kontrol otomatis
+
+  int reading = digitalRead(btnPin);
+
+  if (reading != lastBtnStatus) {
+    lastDebounceTime = millis();
+  }
+
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    if (reading == HIGH && lastBtnStatus == LOW) {
+      // Button pressed event
+      kontrol_katup(1, 300, 45);
+    }
+  }
+
+  lastBtnStatus = reading;
+
+  // Kirim data ke MQTT setiap 10 detik
+  static unsigned long lastSent = 0;
+  if (millis() - lastSent > 10000) {
+    lastSent = millis();
+    DateTime now = rtc.now();
+
+    String payload = "{";
+    payload += "\"status_feeder\":\"ONLINE\",";
+    payload += "\"waktu\":\"" + String(now.year()) + "-" + String(now.month()) + "-" + String(now.day()) + " ";
+    payload += String(now.hour()) + ":" + String(now.minute()) + ":" + String(now.second()) + "\",";
+    payload += "\"last_feed\":\"" + String(now.hour()) + ":" + String(now.minute()) + ":" + String(now.second()) + "\"";
+    payload += "}";
+
+    client.publish(mqtt_topic, payload.c_str());
+    Serial.println("Data MQTT: " + payload);
+  }
+}
+
+void Time_display() {
+  DateTime now = rtc.now();
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= disp_interval) {
+    previousMillis = currentMillis;
+
+    lcd.setCursor((16 - strlen(daysOfTheWeek[now.dayOfTheWeek()])) / 2, 0);
+    lcd.print(daysOfTheWeek[now.dayOfTheWeek()]);
+    lcd.setCursor(4, 1);
+    if (now.hour() < 10) lcd.print('0'); lcd.print(now.hour()); lcd.print(':');
+    if (now.minute() < 10) lcd.print('0'); lcd.print(now.minute()); lcd.print(':');
+    if (now.second() < 10) lcd.print('0'); lcd.print(now.second());
+
+    // Otomatis kasih makan
+    if ((now.hour() == 7 && now.minute() == 0 && now.second() == 0) ||
+        (now.hour() == 16 && now.minute() == 25 && now.second() == 0)) {
+      kontrol_katup(1, 1500, 45);
+    }
+  }
+}
+
+void kontrol_katup(int jumlahBuka, int jedawaktu, int sudutServo) {
+  Serial.println("Beri makan...");
+
+  lcd.clear();
+  lcd.setCursor((16 - 13) / 2, 0);
+  lcd.print("Beri Makan....");
+  lcd.setCursor(0, 1);
+  lcd.print("[                ]");
+
+  int progressLength = 14;
+  int totalSteps = jumlahBuka * 2;
+
+  for (int i = 0; i < totalSteps; i++) {
+    if (i % 2 == 0)
+      servo1.write(sudutServo);
+    else
+      servo1.write(0);
+
+    int filled = map(i + 1, 0, totalSteps, 0, progressLength);
+    lcd.setCursor(1, 1);
+    for (int j = 0; j < progressLength; j++) {
+      if (j < filled) lcd.write(byte(255));
+      else lcd.print(" ");
+    }
+    delay(jedawaktu);
+  }
+
+  lcd.clear();
+  lcd.setCursor((16 - 13) / 2, 0);
+  lcd.print("SELESAI!!!!!");
+  delay(1000);
+  lcd.clear();
+}
