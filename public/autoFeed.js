@@ -16,7 +16,11 @@ async function pollAutoFeedStatus() {
     if (!response.ok) throw new Error('Network response was not ok');
     const data = await response.json();
     if (data.success) {
-      autoFeedStatusElem.textContent = `Auto Feed Status: ${data.message}`;
+      if (data.message !== 'No feeding scheduled at this time' && data.message !== 'Feeding triggered') {
+        autoFeedStatusElem.textContent = `Auto Feed Status: ${data.message}`;
+      } else {
+        autoFeedStatusElem.textContent = '';
+      }
       console.log(`Auto Feed Status: ${data.message}`);
     } else {
       autoFeedStatusElem.textContent = `Auto Feed Error: ${data.message}`;

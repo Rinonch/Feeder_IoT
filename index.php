@@ -1,14 +1,13 @@
 <?php
 include 'koneksi.php'; // pastikan file koneksi.php sudah benar
 
-// Ambil data dari tabel feeder_status
-$q = $conn->query("SELECT * FROM feeder_status LIMIT 1");
+$q = $conn->query("SELECT jadwal_pagi, jadwal_sore FROM auto_feed_schedule WHERE status = 1 ORDER BY id DESC LIMIT 1");
 $data = $q->fetch_assoc();
 
-$status_feeder = $data['status_feeder'] ?? '-';
+$status_feeder = 'OFFLINE';
 $jadwal_pagi = $data['jadwal_pagi'] ?? '-';
 $jadwal_sore = $data['jadwal_sore'] ?? '-';
-$lastFeed = $data['last_feed'] ?? '-';
+$lastFeed = '-';
 $pagi = $data['jadwal_pagi'] ?? '';
 $sore = $data['jadwal_sore'] ?? '';
 ?>
