@@ -1,5 +1,8 @@
 <?php
-$conn = new mysqli("localhost", "tkbmyid_zaidan", "#Us3r_A1r_2025#", "tkbmyid_feeder");
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+include 'koneksi.php';
 header('Content-Type: application/json');
 if ($conn->connect_error) {
     error_log("Database connection failed: " . $conn->connect_error);
@@ -11,8 +14,8 @@ if ($conn->connect_error) {
 date_default_timezone_set('Asia/Jakarta');
 $current_time = date('H:i:s'); // include seconds to match database format
 
-// Get feeding schedule
-$result = $conn->query("SELECT jadwal_pagi, jadwal_sore FROM feeder_status LIMIT 1");
+// Get feeding schedule from new table
+$result = $conn->query("SELECT jadwal_pagi, jadwal_sore FROM auto_feed_schedule WHERE status = 1 ORDER BY id DESC LIMIT 1");
 if (!$result) {
     error_log("Failed to fetch schedule");
     echo json_encode(['success' => false, 'message' => 'Gagal mengambil jadwal']);
@@ -30,15 +33,22 @@ $format_current_time = DateTime::createFromFormat('H:i:s', $current_time);
 $format_jadwal_pagi = DateTime::createFromFormat('H:i:s', $jadwal_pagi);
 $format_jadwal_sore = DateTime::createFromFormat('H:i:s', $jadwal_sore);
 
-if ($format_current_time && ($format_current_time->format('H:i') === $format_jadwal_pagi->format('H:i') || $format_current_time->format('H:i') === $format_jadwal_sore->format('H:i'))) {
+if ($format_current_time && $format_jadwal_pagi && $format_jadwal_sore &&
+    ($format_current_time->format('H:i') === $format_jadwal_pagi->format('H:i') ||
+     $format_current_time->format('H:i') === $format_jadwal_sore->format('H:i'))) {
     if ($last_trigger_time !== $current_time) {
         // Trigger feeding by calling feed.php internally
-        $feed_response = file_get_contents('http://feeder.tk2b.my.id/feed.php');
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, 'http://feeder.tk2b.my.id/feed.php');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        $feed_response = curl_exec($ch);
         if ($feed_response === false) {
-            error_log("Failed to call feed.php");
+            error_log("Failed to call feed.php: " . curl_error($ch));
             echo json_encode(['success' => false, 'message' => 'Gagal memanggil feed.php']);
+            curl_close($ch);
             exit;
         }
+        curl_close($ch);
         $feed_data = json_decode($feed_response, true);
         if ($feed_data && $feed_data['success']) {
             // Update last trigger time

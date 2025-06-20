@@ -1,4 +1,4 @@
-z<?php
+<?php
 include 'koneksi.php'; // pastikan file koneksi.php sudah benar
 
 // Ambil data dari tabel feeder_status
