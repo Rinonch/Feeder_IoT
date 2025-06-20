@@ -15,6 +15,7 @@ const char* mqtt_user = "feeder";
 const char* mqtt_pass = "Feeder123";
 const char* mqtt_topic = "feeder/status";
 const char* mqtt_command_topic = "feeder/command";
+const char* mqtt_time_sync_topic = "feeder/time_sync";
 
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
@@ -56,6 +57,17 @@ void callback(char* topic, byte* payload, unsigned int length) {
       kontrol_katup(1, 300, 45);
       Serial.println("Servo activation complete");
     }
+  } else if (String(topic) == mqtt_time_sync_topic) {
+    // Parse time string in format "YYYY-MM-DD HH:MM:SS"
+    int year = message.substring(0, 4).toInt();
+    int month = message.substring(5, 7).toInt();
+    int day = message.substring(8, 10).toInt();
+    int hour = message.substring(11, 13).toInt();
+    int minute = message.substring(14, 16).toInt();
+    int second = message.substring(17, 19).toInt();
+
+    rtc.adjust(DateTime(year, month, day, hour, minute, second));
+    Serial.println("RTC updated from MQTT time sync");
   }
 }
 
@@ -89,6 +101,29 @@ void reconnect() {
   }
 }
 
+unsigned long lastNtpSync = 0;
+const unsigned long ntpSyncInterval = 3600000; // 1 hour in ms
+
+void syncNtpTime() {
+  struct tm timeinfo;
+  if (millis() - lastNtpSync > ntpSyncInterval) {
+    if (getLocalTime(&timeinfo)) {
+      rtc.adjust(DateTime(
+        timeinfo.tm_year + 1900,
+        timeinfo.tm_mon + 1,
+        timeinfo.tm_mday,
+        timeinfo.tm_hour,
+        timeinfo.tm_min,
+        timeinfo.tm_sec
+      ));
+      Serial.println("RTC disinkronisasi ulang dengan NTP");
+      lastNtpSync = millis();
+    } else {
+      Serial.println("Gagal mendapatkan waktu dari NTP saat sinkron ulang");
+    }
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Fish Feeder");
@@ -111,12 +146,34 @@ void setup() {
     while (1) delay(10);
   }
 
+  setup_wifi();
+
   // Synchronize RTC time with NTP server on startup
   configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov"); // UTC+7 timezone
+
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    Serial.println("Gagal mendapatkan waktu dari NTP");
+  bool ntpSuccess = false;
+  int retryCount = 0;
+  while (!ntpSuccess && retryCount < 10) {
+    ntpSuccess = getLocalTime(&timeinfo);
+    if (!ntpSuccess) {
+      Serial.println("Gagal mendapatkan waktu dari NTP, mencoba ulang...");
+      delay(1000);
+      retryCount++;
+    }
+  }
+
+  if (!ntpSuccess) {
+    Serial.println("Gagal mendapatkan waktu dari NTP setelah beberapa percobaan");
   } else {
+    Serial.println("Berhasil mendapatkan waktu dari NTP:");
+    Serial.printf("Tahun: %d, Bulan: %d, Hari: %d, Jam: %d, Menit: %d, Detik: %d\n",
+      timeinfo.tm_year + 1900,
+      timeinfo.tm_mon + 1,
+      timeinfo.tm_mday,
+      timeinfo.tm_hour,
+      timeinfo.tm_min,
+      timeinfo.tm_sec);
     rtc.adjust(DateTime(
       timeinfo.tm_year + 1900,
       timeinfo.tm_mon + 1,
@@ -128,7 +185,6 @@ void setup() {
     Serial.println("RTC disinkronisasi dengan NTP");
   }
 
-  setup_wifi();
   espClient.setInsecure(); // trust semua sertifikat (dev only)
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
@@ -163,11 +219,17 @@ void loop() {
     lastSent = millis();
     DateTime now = rtc.now();
 
+    char waktuStr[20];
+    char lastFeedStr[9];
+    snprintf(waktuStr, sizeof(waktuStr), "%04d-%02d-%02d %02d:%02d:%02d",
+      now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second());
+    snprintf(lastFeedStr, sizeof(lastFeedStr), "%02d:%02d:%02d",
+      now.hour(), now.minute(), now.second());
+
     String payload = "{";
     payload += "\"status_feeder\":\"ONLINE\",";
-    payload += "\"waktu\":\"" + String(now.year()) + "-" + String(now.month()) + "-" + String(now.day()) + " ";
-    payload += String(now.hour()) + ":" + String(now.minute()) + ":" + String(now.second()) + "\",";
-    payload += "\"last_feed\":\"" + String(now.hour()) + ":" + String(now.minute()) + ":" + String(now.second()) + "\"";
+    payload += "\"waktu\":\"" + String(waktuStr) + "\",";
+    payload += "\"last_feed\":\"" + String(lastFeedStr) + "\"";
     payload += "}";
 
     client.publish(mqtt_topic, payload.c_str());

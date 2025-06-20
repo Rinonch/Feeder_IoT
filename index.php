@@ -1,4 +1,4 @@
-<?php
+z<?php
 include 'koneksi.php'; // pastikan file koneksi.php sudah benar
 
 // Ambil data dari tabel feeder_status
@@ -242,33 +242,49 @@ $sore = $data['jadwal_sore'] ?? '';
   }
 
   function updateDateTime() {
-    const now = new Date();
-    const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-    dateElem.textContent = days[now.getDay()] + ', ' + now.getDate() + '/' + (now.getMonth()+1) + '/' + now.getFullYear();
-    timeElem.textContent = now.toLocaleTimeString();
+    fetch('current_time.php')
+      .then(response => response.json())
+      .then(data => {
+        let serverTime = new Date(data.current_time);
+        // Adjust time to WIB (UTC+7) with 24-hour wrap-around
+        let adjustedHour = serverTime.getUTCHours() + 7;
+        if (adjustedHour >= 24) adjustedHour -= 24;
+        serverTime.setUTCHours(adjustedHour);
 
-    // Update last feed time in real-time if available
-    const lastFeedElem = document.getElementById('lastFeedInfo');
-    if (lastFeedElem) {
-      const lastFeedText = lastFeedElem.textContent;
-      const match = lastFeedText.match(/(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2})/);
-      if (match) {
-        // Parse date string as UTC and convert to WIB (UTC+7)
-        const utcDateStr = match[1].replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1');
-        const lastFeedDateUTC = new Date(utcDateStr + 'T00:00:00Z');
-        if (!isNaN(lastFeedDateUTC)) {
-          // Add 7 hours for WIB timezone
-          lastFeedDateUTC.setHours(lastFeedDateUTC.getHours() + 7);
-          // Increment last feed time by 1 second
-          lastFeedDateUTC.setSeconds(lastFeedDateUTC.getSeconds() + 1);
-          const formatted = lastFeedDateUTC.toLocaleString('id-ID', {
-            day: '2-digit', month: '2-digit', year: 'numeric',
-            hour: '2-digit', minute: '2-digit', second: '2-digit'
-          });
-          lastFeedElem.textContent = 'Terakhir memberi makan: ' + formatted;
+        const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+        dateElem.textContent = days[serverTime.getUTCDay()] + ', ' + serverTime.getUTCDate() + '/' + (serverTime.getUTCMonth() + 1) + '/' + serverTime.getUTCFullYear();
+        // Format time as 24-hour with leading zeros
+        const hours = adjustedHour.toString().padStart(2, '0');
+        const minutes = serverTime.getUTCMinutes().toString().padStart(2, '0');
+        const seconds = serverTime.getUTCSeconds().toString().padStart(2, '0');
+        timeElem.textContent = `${hours}:${minutes}:${seconds}`;
+
+        // Update last feed time in real-time if available
+        const lastFeedElem = document.getElementById('lastFeedInfo');
+        if (lastFeedElem) {
+          const lastFeedText = lastFeedElem.textContent;
+          const match = lastFeedText.match(/(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2})/);
+          if (match) {
+            // Parse date string as UTC and convert to WIB (UTC+7)
+            const utcDateStr = match[1].replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1');
+            const lastFeedDateUTC = new Date(utcDateStr + 'T00:00:00Z');
+            if (!isNaN(lastFeedDateUTC)) {
+              // Add 7 hours for WIB timezone
+              lastFeedDateUTC.setHours(lastFeedDateUTC.getHours() + 7);
+              // Increment last feed time by 1 second
+              lastFeedDateUTC.setSeconds(lastFeedDateUTC.getSeconds() + 1);
+              const formatted = lastFeedDateUTC.toLocaleString('id-ID', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+              });
+              lastFeedElem.textContent = 'Terakhir memberi makan: ' + formatted;
+            }
+          }
         }
-      }
-    }
+      })
+      .catch(err => {
+        console.error('Failed to fetch server time:', err);
+      });
   }
 
   btnFeed.onclick = async () => {
