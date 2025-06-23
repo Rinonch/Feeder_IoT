@@ -165,7 +165,7 @@ $sore = $data['jadwal_sore'] ?? '';
 
   <button id="btnFeed">🍽 Kasih Makan Sekarang</button>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script src="/public/autoFeed.js"></script>
+  <!-- <script src="/public/autoFeed.js"></script> -->
   <script>
     function publishFeedCommand() {
       const client = mqtt.connect('wss://a0217047345f4f5bb0814a9c88af029b.s1.eu.hivemq.cloud:8884/mqtt', {

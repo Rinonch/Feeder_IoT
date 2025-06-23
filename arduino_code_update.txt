@@ -33,8 +33,7 @@ char daysOfTheWeek[7][12] = {"Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jum'
 Servo servo1;
 const int servoPin = 13;
 const int btnPin = 4;
-int btnStatus = 0;
-int lastBtnStatus = LOW; // For button state change detection
+int lastBtnStatus = HIGH; // default HIGH untuk INPUT_PULLUP
 unsigned long lastDebounceTime = 0;
 unsigned long debounceDelay = 50; // 50 ms debounce
 
@@ -131,7 +130,7 @@ void setup() {
   servo1.attach(servoPin);
   servo1.write(0);
 
-  pinMode(btnPin, INPUT);
+  pinMode(btnPin, INPUT_PULLUP); // gunakan internal pullup
 
   lcd.init();
   lcd.backlight();
@@ -196,22 +195,12 @@ void loop() {
   }
   client.loop();
 
-  Time_display(); // Tampilkan jam dan kontrol otomatis
-
-  int reading = digitalRead(btnPin);
-
-  if (reading != lastBtnStatus) {
-    lastDebounceTime = millis();
+  Time_display();
+  int btnStatus = digitalRead(btnPin);
+  if (btnStatus == HIGH) {
+    kontrol_katup(1, 300, 45);  // Servo bergerak saat tombol HIGH
+    delay(500); // Tambahkan delay agar tidak berulang terus-menerus saat tombol ditekan
   }
-
-  if ((millis() - lastDebounceTime) > debounceDelay) {
-    if (reading == HIGH && lastBtnStatus == LOW) {
-      // Button pressed event
-      kontrol_katup(1, 300, 45);
-    }
-  }
-
-  lastBtnStatus = reading;
 
   // Kirim data ke MQTT setiap 10 detik
   static unsigned long lastSent = 0;
